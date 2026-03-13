@@ -58,9 +58,81 @@ const EFFECTS: Effect[] = [
   { id: 'trace', name: 'Artkit Trace', description: 'Particle flow & geometric tracing', icon: <ImageIcon className="w-6 h-6" /> },
   { id: 'vision', name: 'Computer Vision', description: 'Bounding boxes & analysis overlays', icon: <Maximize className="w-6 h-6" /> },
   { id: 'bitcrush', name: 'Bit Crusher', description: '8-bit retro quantization & posterization', icon: <Binary className="w-6 h-6" /> },
+  { id: 'doubleExposure', name: 'Double Exposure', description: 'Urban glitch & ghost layering', icon: <Layers className="w-6 h-6" /> },
 ];
 
 // --- Components ---
+
+function ThumbnailPreview({ image, effect }: { image: string, effect: FilterType }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [isLoaded, setIsLoaded] = useState(false);
+
+  useEffect(() => {
+    const img = new Image();
+    img.src = image;
+    img.onload = () => {
+      if (!canvasRef.current) return;
+      const canvas = canvasRef.current;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      const size = 300; // Small size for thumbnail
+      canvas.width = size;
+      canvas.height = size;
+
+      // Calculate cover fit
+      const ratio = Math.max(size / img.width, size / img.height);
+      const w = img.width * ratio;
+      const h = img.height * ratio;
+      const x = (size - w) / 2;
+      const y = (size - h) / 2;
+
+      // Create a temporary canvas for the cropped image
+      const cropCanvas = document.createElement('canvas');
+      cropCanvas.width = size;
+      cropCanvas.height = size;
+      const cropCtx = cropCanvas.getContext('2d')!;
+      cropCtx.drawImage(img, x, y, w, h);
+      
+      const croppedImg = new Image();
+      croppedImg.src = cropCanvas.toDataURL();
+      croppedImg.onload = () => {
+        const defaults: Record<FilterType, any> = {
+          halftone: { size: 10, contrast: 1.5, angle: 45, showBackground: true },
+          glitch: { intensity: 0.5, complexity: 0.3, amount: 0.5, seed: 0, showBackground: true },
+          ascii: { fontSize: 8, transparency: 1.0, colorize: false, asciiStrength: 1.0, showBackground: true },
+          dither: { intensity: 0.5, complexity: 0.5, amount: 1.0, seed: 0, showBackground: true },
+          glass: { distortion: 0.4, refraction: 1.3, blur: 0.2, showBackground: true },
+          blur: { length: 20, angle: 0, showBackground: true },
+          trace: { sensitivity: 0.5, density: 0.4, showBackground: false },
+          vision: { boxes: 10, boxSize: 1.0, transparency: 1.0, shape: 'rectangle', seed: 0, showBackground: true },
+          bitcrush: { blockSize: 4, banding: 1.0, dither: 0.5, showBackground: true },
+          doubleExposure: { exposure: 1.5, blur: 15, ghosting: 0.4, blend: 0.6, showBackground: true },
+        };
+
+        FilterService.applyFilter(ctx, size, size, effect, defaults[effect], croppedImg);
+        setIsLoaded(true);
+      };
+    };
+  }, [image, effect]);
+
+  return (
+    <div className="absolute inset-0 w-full h-full">
+      <canvas 
+        ref={canvasRef} 
+        className={cn(
+          "w-full h-full object-cover transition-opacity duration-700",
+          isLoaded ? "opacity-60" : "opacity-0"
+        )}
+      />
+      {!isLoaded && (
+        <div className="absolute inset-0 flex items-center justify-center bg-white/5 animate-pulse">
+          <ImageIcon className="w-8 h-8 text-white/10" />
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function App() {
   const [image, setImage] = useState<string | null>(null);
@@ -86,7 +158,10 @@ export default function App() {
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({ 
     onDrop, 
-    accept: { 'image/*': [] },
+    accept: { 
+      'image/*': ['.jpeg', '.jpg', '.png', '.gif', '.webp', '.avif'],
+      'image/avif': ['.avif']
+    },
     multiple: false,
     noClick: !!image 
   } as any);
@@ -138,15 +213,16 @@ export default function App() {
   useEffect(() => {
     if (activeEffect && Object.keys(params).length === 0) {
       const defaults: Record<FilterType, any> = {
-        halftone: { size: 10, contrast: 1.5, angle: 45 },
-        glitch: { intensity: 0.5, complexity: 0.3, amount: 0.5, seed: 0 },
+        halftone: { size: 10, contrast: 1.5, angle: 45, showBackground: true },
+        glitch: { intensity: 0.5, complexity: 0.3, amount: 0.5, seed: 0, showBackground: true },
         ascii: { fontSize: 8, transparency: 1.0, colorize: false, asciiStrength: 1.0, showBackground: true },
-        dither: { intensity: 0.5, complexity: 0.5, amount: 1.0, seed: 0 },
-        glass: { distortion: 0.4, refraction: 1.3, blur: 0.2 },
-        blur: { length: 20, angle: 0 },
+        dither: { intensity: 0.5, complexity: 0.5, amount: 1.0, seed: 0, showBackground: true },
+        glass: { distortion: 0.4, refraction: 1.3, blur: 0.2, showBackground: true },
+        blur: { length: 20, angle: 0, showBackground: true },
         trace: { sensitivity: 0.5, density: 0.4, showBackground: false },
-        vision: { boxes: 10, boxSize: 1.0, transparency: 1.0, shape: 'rectangle', seed: 0 },
-        bitcrush: { colorShift: 0.5, blockSize: 4, banding: 1.0, dither: 0.5 },
+        vision: { boxes: 10, boxSize: 1.0, transparency: 1.0, shape: 'rectangle', seed: 0, showBackground: true },
+        bitcrush: { blockSize: 4, banding: 1.0, dither: 0.5, showBackground: true },
+        doubleExposure: { exposure: 1.5, blur: 15, ghosting: 0.4, blend: 0.6, showBackground: true },
       };
       setParams(defaults[activeEffect]);
     }
@@ -270,12 +346,7 @@ export default function App() {
                     className="group relative aspect-[4/5] rounded-none bg-white/5 border border-white/5 overflow-hidden hover:bg-white/10 transition-all hover:border-red-600/50"
                   >
                     <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent z-10" />
-                    <img 
-                      src={image} 
-                      alt={effect.name}
-                      className="absolute inset-0 w-full h-full object-cover opacity-50 group-hover:scale-105 transition-transform duration-500"
-                      referrerPolicy="no-referrer"
-                    />
+                    <ThumbnailPreview image={image} effect={effect.id} />
                     <div className="absolute inset-0 z-20 p-6 flex flex-col justify-end items-start text-left">
                       <div className="w-10 h-10 rounded-none bg-black/50 backdrop-blur-md flex items-center justify-center mb-3 group-hover:bg-red-600 group-hover:text-white transition-colors">
                         {effect.icon}
@@ -309,7 +380,9 @@ export default function App() {
       <AnimatePresence>
         {isExporting && (
           <ExportModal 
-            image={processedImage || image} 
+            originalImage={image!}
+            effect={activeEffect}
+            params={params}
             onClose={() => setIsExporting(false)} 
           />
         )}
@@ -432,15 +505,16 @@ function Workspace({
           <button 
             onClick={() => {
               const defaults: Record<FilterType, any> = {
-                halftone: { size: 10, contrast: 1.5, angle: 45 },
-                glitch: { intensity: 0.5, complexity: 0.3, amount: 0.5, seed: 0 },
+                halftone: { size: 10, contrast: 1.5, angle: 45, showBackground: true },
+                glitch: { intensity: 0.5, complexity: 0.3, amount: 0.5, seed: 0, showBackground: true },
                 ascii: { fontSize: 8, transparency: 1.0, colorize: false, asciiStrength: 1.0, showBackground: true },
-                dither: { intensity: 0.5, complexity: 0.5, amount: 1.0, seed: 0 },
-                glass: { distortion: 0.4, refraction: 1.3, blur: 0.2 },
-                blur: { length: 20, angle: 0 },
+                dither: { intensity: 0.5, complexity: 0.5, amount: 1.0, seed: 0, showBackground: true },
+                glass: { distortion: 0.4, refraction: 1.3, blur: 0.2, showBackground: true },
+                blur: { length: 20, angle: 0, showBackground: true },
                 trace: { sensitivity: 0.5, density: 0.4, showBackground: false },
-                vision: { boxes: 10, boxSize: 1.0, transparency: 1.0, shape: 'rectangle', seed: 0 },
-                bitcrush: { colorShift: 0.5, blockSize: 4, banding: 1.0, dither: 0.5 },
+                vision: { boxes: 10, boxSize: 1.0, transparency: 1.0, shape: 'rectangle', seed: 0, showBackground: true },
+                bitcrush: { blockSize: 4, banding: 1.0, dither: 0.5, showBackground: true },
+                doubleExposure: { exposure: 1.5, blur: 15, ghosting: 0.4, blend: 0.6, showBackground: true },
               };
               setParams(defaults[effect]);
             }}
@@ -453,8 +527,8 @@ function Workspace({
         <div className="space-y-8">
           {Object.entries(params)
             .filter(([key]) => {
-              if (effect === 'ascii' && ['colorize', 'showBackground'].includes(key)) return false;
-              if (effect === 'trace' && key === 'showBackground') return false;
+              if (key === 'showBackground') return false;
+              if (effect === 'ascii' && key === 'colorize') return false;
               if (effect === 'glitch' && key === 'seed') return false;
               if (effect === 'vision' && key === 'seed') return false;
               // Keep all sliders for dither as requested
@@ -477,8 +551,9 @@ function Workspace({
                     ['size', 'length', 'fontSize', 'boxes', 'blockSize'].includes(key) ? 50 : 
                     key === 'boxSize' ? 3 :
                     key === 'seed' ? 1000 :
+                    key === 'exposure' ? 3 :
                     ['contrast', 'refraction'].includes(key) ? 3 :
-                    ['asciiStrength', 'transparency', 'intensity', 'complexity', 'amount', 'distortion', 'blur', 'sensitivity', 'density', 'banding', 'dither', 'colorShift'].includes(key) ? 1 : 
+                    ['asciiStrength', 'transparency', 'intensity', 'complexity', 'amount', 'distortion', 'blur', 'sensitivity', 'density', 'banding', 'dither', 'ghosting', 'blend'].includes(key) ? 1 : 
                     2
                   } 
                   step={key === 'blockSize' ? 1 : 0.01}
@@ -540,53 +615,40 @@ function Workspace({
         </div>
 
         <div className="mt-12 grid grid-cols-2 gap-3">
-          {effect === 'ascii' || effect === 'trace' ? (
-            <>
-              <button 
-                onClick={() => setParams(prev => ({ ...prev, showBackground: !prev.showBackground }))}
-                className={cn(
-                  "flex items-center justify-center gap-2 py-3 rounded-none border transition-all text-sm font-medium",
-                  params.showBackground ? "bg-red-600 text-white border-red-600" : "bg-white/5 border-white/10 text-zinc-400 hover:bg-white/10"
-                )}
-              >
-                {params.showBackground ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                Background
-              </button>
-              {effect === 'ascii' ? (
-                <button 
-                  onClick={() => setParams(prev => ({ ...prev, colorize: !prev.colorize }))}
-                  className={cn(
-                    "flex items-center justify-center gap-2 py-3 rounded-none border transition-all text-sm font-medium",
-                    params.colorize ? "bg-red-600 text-white border-red-600" : "bg-white/5 border-white/10 text-zinc-400 hover:bg-white/10"
-                  )}
-                >
-                  <Palette className="w-4 h-4" />
-                  Colorize
-                </button>
-              ) : (
-                <button 
-                  onClick={handleRandomize}
-                  className="flex items-center justify-center gap-2 py-3 rounded-none bg-white/5 border border-white/10 hover:bg-white/10 transition-colors text-sm font-medium"
-                >
-                  <Zap className="w-4 h-4" />
-                  Randomize
-                </button>
+          <button 
+            onClick={() => setParams(prev => ({ ...prev, showBackground: !prev.showBackground }))}
+            className={cn(
+              "flex items-center justify-center gap-2 py-3 rounded-none border transition-all text-sm font-medium",
+              params.showBackground ? "bg-red-600 text-white border-red-600" : "bg-white/5 border-white/10 text-zinc-400 hover:bg-white/10"
+            )}
+          >
+            {params.showBackground ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            Background
+          </button>
+
+          {effect === 'ascii' ? (
+            <button 
+              onClick={() => setParams(prev => ({ ...prev, colorize: !prev.colorize }))}
+              className={cn(
+                "flex items-center justify-center gap-2 py-3 rounded-none border transition-all text-sm font-medium",
+                params.colorize ? "bg-red-600 text-white border-red-600" : "bg-white/5 border-white/10 text-zinc-400 hover:bg-white/10"
               )}
-            </>
+            >
+              <Palette className="w-4 h-4" />
+              Colorize
+            </button>
           ) : effect === 'glitch' || effect === 'vision' ? (
             <button 
               onClick={() => setParams(prev => ({ ...prev, seed: Math.random() * 1000 }))}
-              className="col-span-2 flex items-center justify-center gap-2 py-3 rounded-none bg-red-600 text-white hover:bg-red-500 transition-colors text-sm font-medium"
+              className="flex items-center justify-center gap-2 py-3 rounded-none bg-red-600 text-white hover:bg-red-500 transition-colors text-sm font-medium"
             >
               <Zap className="w-4 h-4" />
-              Randomize Position
+              Randomize
             </button>
-          ) : effect === 'dither' || effect === 'bitcrush' ? (
-            null
           ) : (
             <button 
               onClick={handleRandomize}
-              className="col-span-2 flex items-center justify-center gap-2 py-3 rounded-none bg-white/5 border border-white/10 hover:bg-white/10 transition-colors text-sm font-medium"
+              className="flex items-center justify-center gap-2 py-3 rounded-none bg-white/5 border border-white/10 hover:bg-white/10 transition-colors text-sm font-medium"
             >
               <Zap className="w-4 h-4" />
               Randomize
@@ -600,35 +662,79 @@ function Workspace({
 
 // --- Export Modal ---
 
-function ExportModal({ image, onClose }: { image: string, onClose: () => void }) {
+function ExportModal({ originalImage, effect, params, onClose }: { 
+  originalImage: string, 
+  effect: FilterType | null,
+  params: Record<string, any>,
+  onClose: () => void 
+}) {
   const [format, setFormat] = useState('png');
   const [quality, setQuality] = useState(90);
+  const [resolution, setResolution] = useState('1080p');
+  const [isProcessing, setIsProcessing] = useState(false);
 
-  const handleDownload = () => {
+  const handleDownload = async () => {
+    setIsProcessing(true);
+    
+    // Give UI a chance to update
+    await new Promise(resolve => setTimeout(resolve, 100));
+
     const link = document.createElement('a');
     link.download = `radimg-export.${format}`;
     
-    if (format === 'jpg') {
-      // Convert to JPG with quality
-      const canvas = document.createElement('canvas');
-      const img = new Image();
-      img.onload = () => {
-        canvas.width = img.width;
-        canvas.height = img.height;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.fillStyle = '#FFFFFF';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-          ctx.drawImage(img, 0, 0);
-          link.href = canvas.toDataURL('image/jpeg', quality / 100);
-          link.click();
+    const canvas = document.createElement('canvas');
+    const img = new Image();
+    
+    img.onload = () => {
+      let targetWidth = img.width;
+      let targetHeight = img.height;
+
+      if (resolution === '4k') {
+        targetWidth = 3840;
+        targetHeight = 2160;
+      } else if (resolution === '1080p') {
+        targetWidth = 1920;
+        targetHeight = 1080;
+      }
+
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+      const ctx = canvas.getContext('2d');
+      
+      if (ctx) {
+        if (effect) {
+          // Re-apply filter at high resolution
+          FilterService.applyFilter(ctx, targetWidth, targetHeight, effect, params, img);
+        } else {
+          // Just draw original image at target resolution
+          if (format === 'jpg') {
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+          }
+          ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
         }
-      };
-      img.src = image;
-    } else {
-      link.href = image;
-      link.click();
-    }
+        
+        let mimeType = 'image/png';
+        if (format === 'jpg') mimeType = 'image/jpeg';
+        if (format === 'avif') mimeType = 'image/avif';
+        if (format === 'tiff') mimeType = 'image/tiff';
+
+        try {
+          link.href = canvas.toDataURL(mimeType, (format === 'jpg' || format === 'avif') ? quality / 100 : undefined);
+          link.click();
+        } catch (e) {
+          console.error("Export failed:", e);
+        }
+      }
+      setIsProcessing(false);
+    };
+    
+    img.onerror = () => {
+      setIsProcessing(false);
+      console.error("Failed to load image for export");
+    };
+    
+    img.src = originalImage;
   };
 
   return (
@@ -654,8 +760,8 @@ function ExportModal({ image, onClose }: { image: string, onClose: () => void })
           <div className="space-y-6">
             <div className="space-y-3">
               <label className="text-sm font-medium text-zinc-400">File Format</label>
-              <div className="grid grid-cols-3 gap-2">
-                {['png', 'jpg', 'tiff'].map(f => (
+              <div className="grid grid-cols-4 gap-2">
+                {['png', 'jpg', 'tiff', 'avif'].map(f => (
                   <button
                     key={f}
                     onClick={() => setFormat(f)}
@@ -670,7 +776,7 @@ function ExportModal({ image, onClose }: { image: string, onClose: () => void })
               </div>
             </div>
 
-            {format === 'jpg' && (
+            {(format === 'jpg' || format === 'avif') && (
               <div className="space-y-3">
                 <div className="flex justify-between text-sm">
                   <label className="text-zinc-400">Quality</label>
@@ -689,15 +795,25 @@ function ExportModal({ image, onClose }: { image: string, onClose: () => void })
 
             <div className="space-y-3">
               <label className="text-sm font-medium text-zinc-400">Resolution</label>
-              <div className="p-4 rounded-none bg-white/5 border border-white/5 space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-zinc-500">Source Size</span>
-                  <span className="font-mono">1920 × 1080</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-zinc-500">File Size</span>
-                  <span className="font-mono">~2.4 MB</span>
-                </div>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { id: '1080p', label: '1080p', size: '1920 × 1080' },
+                  { id: '4k', label: '4K Ultra HD', size: '3840 × 2160' }
+                ].map(r => (
+                  <button
+                    key={r.id}
+                    onClick={() => setResolution(r.id)}
+                    className={cn(
+                      "p-3 rounded-none border text-left transition-all",
+                      resolution === r.id ? "bg-red-600 border-red-600 text-white" : "bg-white/5 border-white/10 text-zinc-400 hover:bg-white/10"
+                    )}
+                  >
+                    <div className="text-sm font-bold uppercase">{r.label}</div>
+                    <div className={cn("text-[10px] font-mono", resolution === r.id ? "text-white/70" : "text-zinc-500")}>
+                      {r.size}
+                    </div>
+                  </button>
+                ))}
               </div>
             </div>
           </div>
@@ -705,10 +821,18 @@ function ExportModal({ image, onClose }: { image: string, onClose: () => void })
           <div className="flex flex-col gap-3">
             <button 
               onClick={handleDownload}
-              className="flex-1 flex flex-col items-center justify-center gap-3 bg-red-600 hover:bg-red-500 text-white rounded-none transition-all group"
+              disabled={isProcessing}
+              className={cn(
+                "flex-1 flex flex-col items-center justify-center gap-3 rounded-none transition-all group",
+                isProcessing ? "bg-zinc-800 cursor-wait" : "bg-red-600 hover:bg-red-500 text-white"
+              )}
             >
-              <Download className="w-8 h-8 group-hover:scale-110 transition-transform" />
-              <span className="font-bold">Save to Device</span>
+              {isProcessing ? (
+                <div className="w-8 h-8 border-4 border-white/20 border-t-white rounded-none animate-spin" />
+              ) : (
+                <Download className="w-8 h-8 group-hover:scale-110 transition-transform" />
+              )}
+              <span className="font-bold">{isProcessing ? 'Processing...' : 'Save to Device'}</span>
             </button>
           </div>
         </div>

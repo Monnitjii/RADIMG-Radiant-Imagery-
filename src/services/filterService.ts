@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export type FilterType = 'halftone' | 'glitch' | 'ascii' | 'dither' | 'glass' | 'blur' | 'trace' | 'vision' | 'bitcrush';
+export type FilterType = 'halftone' | 'glitch' | 'ascii' | 'dither' | 'glass' | 'blur' | 'trace' | 'vision' | 'bitcrush' | 'doubleExposure';
 
 export interface FilterParams {
   [key: string]: any;
@@ -21,9 +21,13 @@ export class FilterService {
     params: FilterParams,
     originalImage: HTMLImageElement
   ) {
-    // Reset canvas to original image before applying filter
-    ctx.drawImage(originalImage, 0, 0, width, height);
-    const imageData = ctx.getImageData(0, 0, width, height);
+    // Create a temporary canvas to get image data without drawing to the main canvas yet
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = width;
+    tempCanvas.height = height;
+    const tempCtx = tempCanvas.getContext('2d')!;
+    tempCtx.drawImage(originalImage, 0, 0, width, height);
+    const imageData = tempCtx.getImageData(0, 0, width, height);
     const data = imageData.data;
 
     switch (type) {
@@ -54,7 +58,64 @@ export class FilterService {
       case 'bitcrush':
         this.applyBitcrush(ctx, width, height, params, imageData);
         break;
+      case 'doubleExposure':
+        this.applyDoubleExposure(ctx, width, height, params, originalImage);
+        break;
     }
+  }
+
+  private static applyDoubleExposure(ctx: CanvasRenderingContext2D, w: number, h: number, p: any, img: HTMLImageElement) {
+    const exposure = p.exposure ?? 1.5;
+    const blur = p.blur ?? 15;
+    const ghosting = p.ghosting ?? 0.4;
+    const blend = p.blend ?? 0.6;
+    const showBackground = p.showBackground !== false;
+
+    ctx.clearRect(0, 0, w, h);
+
+    // 1. Base Layer (Overexposed & Blurred)
+    ctx.save();
+    if (showBackground) {
+      ctx.filter = `brightness(${exposure * 100}%) contrast(${exposure * 120}%) blur(${blur}px)`;
+      ctx.drawImage(img, 0, 0, w, h);
+    }
+    ctx.restore();
+
+    // 2. Ghost Layer (Offset & Transparent)
+    ctx.save();
+    ctx.globalAlpha = ghosting;
+    ctx.globalCompositeOperation = 'screen';
+    ctx.filter = `brightness(${exposure * 150}%) contrast(150%) blur(${blur / 2}px)`;
+    ctx.drawImage(img, w * 0.05, h * 0.05, w, h);
+    ctx.restore();
+
+    // 3. Procedural "Urban" Layer (Double Exposure using self-texture)
+    // We use a high-contrast, scaled-up, and slightly rotated version of the image to simulate "architecture"
+    ctx.save();
+    ctx.globalAlpha = blend;
+    ctx.globalCompositeOperation = 'overlay';
+    ctx.translate(w / 2, h / 2);
+    ctx.rotate(Math.PI / 180 * 5); // 5 degree rotation
+    ctx.scale(1.2, 1.2); // 1.2x scale
+    ctx.filter = `grayscale(100%) contrast(300%) brightness(80%) blur(2px)`;
+    ctx.drawImage(img, -w / 2, -h / 2, w, h);
+    ctx.restore();
+
+    // 4. Subject Detail Layer (High Contrast)
+    ctx.save();
+    ctx.globalAlpha = 0.8;
+    ctx.globalCompositeOperation = 'soft-light';
+    ctx.filter = `contrast(200%) brightness(110%)`;
+    ctx.drawImage(img, 0, 0, w, h);
+    ctx.restore();
+
+    // 5. Washed-out Bleed (Bloom)
+    ctx.save();
+    ctx.globalAlpha = 0.3;
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.filter = `blur(30px) brightness(200%)`;
+    ctx.drawImage(img, 0, 0, w, h);
+    ctx.restore();
   }
 
   private static applyHalftone(ctx: CanvasRenderingContext2D, w: number, h: number, p: any, img: HTMLImageElement) {
@@ -70,8 +131,13 @@ export class FilterService {
     tempCtx.drawImage(img, 0, 0, w, h);
     const imageData = tempCtx.getImageData(0, 0, w, h).data;
 
-    ctx.fillStyle = 'white';
-    ctx.fillRect(0, 0, w, h);
+    if (p.showBackground !== false) {
+      ctx.fillStyle = 'white';
+      ctx.fillRect(0, 0, w, h);
+    } else {
+      ctx.clearRect(0, 0, w, h);
+    }
+    
     ctx.fillStyle = 'black';
 
     const diag = Math.sqrt(w * w + h * h);
@@ -136,6 +202,16 @@ export class FilterService {
       }
     }
     
+    if (p.showBackground === false) {
+      // Make non-glitched pixels transparent
+      for (let i = 0; i < data.length; i += 4) {
+        if (newData[i] === data[i] && newData[i+1] === data[i+1] && newData[i+2] === data[i+2]) {
+          newData[i+3] = 0;
+        }
+      }
+      ctx.clearRect(0, 0, w, h);
+    }
+    
     ctx.putImageData(new ImageData(newData, w, h), 0, 0);
 
     // Slice Glitches (Blocks)
@@ -187,8 +263,7 @@ export class FilterService {
         ctx.fillRect(0, 0, w, h);
       }
     } else {
-      ctx.fillStyle = 'black';
-      ctx.fillRect(0, 0, w, h);
+      ctx.clearRect(0, 0, w, h);
     }
 
     ctx.font = `${fontSize}px monospace`;
@@ -286,6 +361,13 @@ export class FilterService {
         data[i + 1] = newG;
         data[i + 2] = newB;
         
+        if (p.showBackground === false) {
+          // If background is transparent, make white pixels transparent
+          if (newR === 255 && newG === 255 && newB === 255) {
+            data[i + 3] = 0;
+          }
+        }
+
         const errR = (oldR - newR) * complexity;
         const errG = (oldG - newG) * complexity;
         const errB = (oldB - newB) * complexity;
@@ -312,6 +394,9 @@ export class FilterService {
       }
     }
 
+    if (p.showBackground === false) {
+      ctx.clearRect(0, 0, w, h);
+    }
     ctx.putImageData(imageData, 0, 0);
   }
 
@@ -320,9 +405,13 @@ export class FilterService {
     const refraction = p.refraction ?? 1.3;
     const blurAmt = p.blur ?? 0.2;
 
-    ctx.filter = `blur(${blurAmt * 10}px)`;
-    ctx.drawImage(img, 0, 0, w, h);
-    ctx.filter = 'none';
+    if (p.showBackground !== false) {
+      ctx.filter = `blur(${blurAmt * 10}px)`;
+      ctx.drawImage(img, 0, 0, w, h);
+      ctx.filter = 'none';
+    } else {
+      ctx.clearRect(0, 0, w, h);
+    }
 
     // Simple refraction simulation using displacement
     const tempCanvas = document.createElement('canvas');
@@ -347,8 +436,10 @@ export class FilterService {
     const angle = (p.angle ?? 0) * (Math.PI / 180);
     
     ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = 'black';
-    ctx.fillRect(0, 0, w, h);
+    if (p.showBackground !== false) {
+      ctx.fillStyle = 'black';
+      ctx.fillRect(0, 0, w, h);
+    }
     
     const steps = Math.max(1, Math.floor(length));
     ctx.globalAlpha = 1 / steps;
@@ -378,8 +469,7 @@ export class FilterService {
       ctx.fillStyle = 'rgba(0,0,0,0.7)';
       ctx.fillRect(0, 0, w, h);
     } else {
-      ctx.fillStyle = 'rgba(0,0,0,1)';
-      ctx.fillRect(0, 0, w, h);
+      ctx.clearRect(0, 0, w, h);
     }
     
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
@@ -423,7 +513,11 @@ export class FilterService {
   }
 
   private static applyVision(ctx: CanvasRenderingContext2D, w: number, h: number, p: any, img: HTMLImageElement) {
-    ctx.drawImage(img, 0, 0, w, h);
+    if (p.showBackground !== false) {
+      ctx.drawImage(img, 0, 0, w, h);
+    } else {
+      ctx.clearRect(0, 0, w, h);
+    }
     
     const boxesCount = Math.floor(p.boxes ?? 10);
     const boxSize = p.boxSize ?? 1.0;
@@ -580,8 +674,7 @@ export class FilterService {
 
   private static applyBitcrush(ctx: CanvasRenderingContext2D, w: number, h: number, p: any, imageData: ImageData) {
     const data = imageData.data;
-    const colorShift = Math.max(0, Math.min(1, p.colorShift ?? 0.5));
-    const shift = Math.floor(colorShift * 7); // 0 to 7
+    const shift = 0; // Removed colorShift
     const blockSize = Math.max(1, Math.floor(p.blockSize ?? 4));
     const banding = p.banding ?? 1.0;
     const ditherAmount = p.dither ?? 0.0;
@@ -662,9 +755,19 @@ export class FilterService {
         data[i] = oldR * (1 - banding) + newR * banding;
         data[i + 1] = oldG * (1 - banding) + newG * banding;
         data[i + 2] = oldB * (1 - banding) + newB * banding;
+
+        if (p.showBackground === false) {
+          // If background is transparent, make white pixels transparent
+          if (data[i] > 240 && data[i+1] > 240 && data[i+2] > 240) {
+            data[i + 3] = 0;
+          }
+        }
       }
     }
 
+    if (p.showBackground === false) {
+      ctx.clearRect(0, 0, w, h);
+    }
     ctx.putImageData(imageData, 0, 0);
   }
 }
