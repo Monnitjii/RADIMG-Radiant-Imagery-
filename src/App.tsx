@@ -18,9 +18,6 @@ import {
   Wind, 
   Zap, 
   ChevronLeft,
-  Share2,
-  Copy,
-  Check,
   X,
   Eye,
   EyeOff,
@@ -110,7 +107,7 @@ function ThumbnailPreview({ image, effect }: { image: string, effect: FilterType
           vision: { boxes: 10, boxSize: 1.0, transparency: 1.0, shape: 'rectangle', seed: 0, showBackground: true },
           bitcrush: { blockSize: 4, banding: 1.0, dither: 0.5, showBackground: true },
           doubleExposure: { exposure: 1.5, blur: 15, ghosting: 0.4, blend: 0.6, showBackground: true },
-          outline: { thickness: 3, glow: 0.5, edgeBlur: 0.1, showBackground: true },
+          outline: { thickness: 2, glow: 0.3, edgeBlur: 0.1, showBackground: true },
         };
 
         FilterService.applyFilter(ctx, size, size, effect, defaults[effect], croppedImg);
@@ -143,7 +140,6 @@ export default function App() {
   const [params, setParams] = useState<Record<string, any>>({});
   const [history, setHistory] = useState<{ effect: FilterType, params: Record<string, any> }[]>([]);
   const [redoStack, setRedoStack] = useState<{ effect: FilterType, params: Record<string, any> }[]>([]);
-  const [processedImage, setProcessedImage] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [showControls, setShowControls] = useState(true);
 
@@ -153,7 +149,6 @@ export default function App() {
       const reader = new FileReader();
       reader.onload = () => {
         setImage(reader.result as string);
-        setProcessedImage(reader.result as string);
       };
       reader.readAsDataURL(file);
     }
@@ -171,7 +166,6 @@ export default function App() {
 
   const handleReset = () => {
     setImage(null);
-    setProcessedImage(null);
     setActiveEffect(null);
     setParams({});
     setHistory([]);
@@ -200,6 +194,13 @@ export default function App() {
 
   const addToHistory = useCallback((effect: FilterType, stateToSave: Record<string, any>) => {
     setHistory(prev => {
+      // Don't add if the state is identical to the last entry
+      if (prev.length > 0) {
+        const last = prev[prev.length - 1];
+        if (last.effect === effect && JSON.stringify(last.params) === JSON.stringify(stateToSave)) {
+          return prev;
+        }
+      }
       // Limit history to 50 entries
       const next = [...prev, { effect, params: stateToSave }];
       if (next.length > 50) return next.slice(1);
@@ -208,9 +209,16 @@ export default function App() {
     setRedoStack([]);
   }, []);
 
-  const handleProcessed = useCallback((dataUrl: string) => {
-    setProcessedImage(dataUrl);
-  }, []);
+  // Debounce history updates
+  useEffect(() => {
+    if (!activeEffect || Object.keys(params).length === 0) return;
+    
+    const timer = setTimeout(() => {
+      addToHistory(activeEffect, params);
+    }, 1000); // 1 second debounce
+
+    return () => clearTimeout(timer);
+  }, [params, activeEffect, addToHistory]);
 
   // Initialize default params when effect changes
   useEffect(() => {
@@ -226,7 +234,7 @@ export default function App() {
         vision: { boxes: 10, boxSize: 1.0, transparency: 1.0, shape: 'rectangle', seed: 0, showBackground: true },
         bitcrush: { blockSize: 4, banding: 1.0, dither: 0.5, showBackground: true },
         doubleExposure: { exposure: 1.5, blur: 15, ghosting: 0.4, blend: 0.6, showBackground: true },
-        outline: { thickness: 3, glow: 0.5, edgeBlur: 0.1, showBackground: true },
+        outline: { thickness: 2, glow: 0.3, edgeBlur: 0.1, showBackground: true },
       };
       setParams(defaults[activeEffect]);
     }
@@ -369,10 +377,8 @@ export default function App() {
             effect={activeEffect} 
             params={params}
             setParams={(newParams) => {
-              addToHistory(activeEffect, params);
               setParams(newParams);
             }}
-            onProcessed={handleProcessed}
             onClose={() => {
               setActiveEffect(null);
               setParams({});
@@ -404,14 +410,12 @@ function Workspace({
   effect, 
   params, 
   setParams, 
-  onProcessed, 
   onClose 
 }: { 
   image: string, 
   effect: FilterType, 
   params: Record<string, any>,
   setParams: (p: any) => void,
-  onProcessed: (url: string) => void,
   onClose: () => void 
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -451,10 +455,9 @@ function Workspace({
     // Use a small timeout to allow UI to show processing state
     requestAnimationFrame(() => {
       FilterService.applyFilter(ctx, canvas.width, canvas.height, effect, params, img);
-      onProcessed(canvas.toDataURL('image/png'));
       setIsProcessing(false);
     });
-  }, [effect, params, onProcessed]);
+  }, [effect, params]);
 
   useEffect(() => {
     render();
@@ -519,7 +522,7 @@ function Workspace({
                 vision: { boxes: 10, boxSize: 1.0, transparency: 1.0, shape: 'rectangle', seed: 0, showBackground: true },
                 bitcrush: { blockSize: 4, banding: 1.0, dither: 0.5, showBackground: true },
                 doubleExposure: { exposure: 1.5, blur: 15, ghosting: 0.4, blend: 0.6, showBackground: true },
-                outline: { thickness: 3, glow: 0.5, edgeBlur: 0.1, showBackground: true },
+                outline: { thickness: 2, glow: 0.3, edgeBlur: 0.1, showBackground: true },
               };
               setParams(defaults[effect]);
             }}
@@ -623,7 +626,7 @@ function Workspace({
         </div>
 
         <div className="mt-12 grid grid-cols-1 gap-3">
-          {effect !== 'halftone' && (
+          {effect !== 'halftone' && effect !== 'doubleExposure' && (
             <button 
               onClick={() => setParams(prev => ({ ...prev, showBackground: !prev.showBackground }))}
               className={cn(

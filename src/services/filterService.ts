@@ -68,8 +68,8 @@ export class FilterService {
   }
 
   private static applyOutline(ctx: CanvasRenderingContext2D, w: number, h: number, p: any, img: HTMLImageElement) {
-    const thickness = p.thickness ?? 5;
-    const glow = p.glow ?? 0.5;
+    const thickness = p.thickness ?? 2;
+    const glow = p.glow ?? 0.3;
     const edgeBlur = p.edgeBlur ?? 0.1;
     const showBackground = p.showBackground !== false;
 
@@ -77,24 +77,24 @@ export class FilterService {
 
     ctx.clearRect(0, 0, w, h);
 
-    // 1. Background (Fixed black)
-    ctx.fillStyle = 'black';
-    ctx.fillRect(0, 0, w, h);
-
-    // 2. Subject (Original) - Respected by showBackground
+    // 1. Background & Subject
     if (showBackground) {
+      // Fixed black background for the "Outline" look when image is shown
+      ctx.fillStyle = 'black';
+      ctx.fillRect(0, 0, w, h);
+
+      // 2. Subject (Original)
       ctx.save();
       ctx.drawImage(img, 0, 0, w, h);
       ctx.restore();
     }
 
-    // 3. Outline Effect (Sobel Edge Detection)
+    // 3. Outline Effect (Optimized Sobel)
     const tempCanvas = document.createElement('canvas');
     tempCanvas.width = w;
     tempCanvas.height = h;
     const tCtx = tempCanvas.getContext('2d')!;
     
-    // Grayscale pass for edge detection
     tCtx.filter = 'grayscale(100%)';
     tCtx.drawImage(img, 0, 0, w, h);
     
@@ -102,37 +102,31 @@ export class FilterService {
     const data = imageData.data;
     const edgeData = new Uint8ClampedArray(data.length);
 
-    // Sobel kernels
-    const gx = [
-      [-1, 0, 1],
-      [-2, 0, 2],
-      [-1, 0, 1]
-    ];
-    const gy = [
-      [-1, -2, -1],
-      [0, 0, 0],
-      [1, 2, 1]
-    ];
-
+    // Optimized Sobel loop (unrolled)
     for (let y = 1; y < h - 1; y++) {
+      const rowOffset = y * w;
+      const prevRowOffset = (y - 1) * w;
+      const nextRowOffset = (y + 1) * w;
+
       for (let x = 1; x < w - 1; x++) {
-        let resX = 0;
-        let resY = 0;
+        // Kernel indices
+        const p00 = data[(prevRowOffset + (x - 1)) * 4];
+        const p01 = data[(prevRowOffset + x) * 4];
+        const p02 = data[(prevRowOffset + (x + 1)) * 4];
+        const p10 = data[(rowOffset + (x - 1)) * 4];
+        const p12 = data[(rowOffset + (x + 1)) * 4];
+        const p20 = data[(nextRowOffset + (x - 1)) * 4];
+        const p21 = data[(nextRowOffset + x) * 4];
+        const p22 = data[(nextRowOffset + (x + 1)) * 4];
 
-        for (let ky = -1; ky <= 1; ky++) {
-          for (let kx = -1; kx <= 1; kx++) {
-            const pixelIdx = ((y + ky) * w + (x + kx)) * 4;
-            const val = data[pixelIdx]; // Grayscale so R=G=B
-            resX += val * gx[ky + 1][kx + 1];
-            resY += val * gy[ky + 1][kx + 1];
-          }
-        }
+        const resX = (p02 + 2 * p12 + p22) - (p00 + 2 * p10 + p20);
+        const resY = (p20 + 2 * p21 + p22) - (p00 + 2 * p01 + p02);
 
-        const magnitude = Math.sqrt(resX * resX + resY * resY);
-        const i = (y * w + x) * 4;
+        const magnitude = Math.abs(resX) + Math.abs(resY);
         
         // Higher threshold for thinner lines
-        if (magnitude > 45) {
+        if (magnitude > 60) {
+          const i = (rowOffset + x) * 4;
           edgeData[i] = 255;
           edgeData[i+1] = 255;
           edgeData[i+2] = 255;
@@ -146,24 +140,22 @@ export class FilterService {
     ctx.save();
     ctx.globalCompositeOperation = 'screen';
     
-    // Glow
+    // Reduced glow multiplier
     if (glow > 0) {
-      ctx.shadowBlur = glow * 15;
+      ctx.shadowBlur = glow * 10;
       ctx.shadowColor = color;
     }
     
-    // Edge Blur - Only affects the lines drawn below
-    ctx.filter = `blur(${edgeBlur * 10}px)`;
+    ctx.filter = `blur(${edgeBlur * 8}px)`;
     
-    ctx.globalAlpha = 0.8;
     const t = Math.floor(thickness);
-    // Subtle thickness loop
-    for (let dy = -t; dy <= t; dy++) {
-      for (let dx = -t; dx <= t; dx++) {
-        if (dx*dx + dy*dy <= t*t) {
-          ctx.drawImage(tempCanvas, dx, dy);
-        }
-      }
+    if (t > 0) {
+      ctx.globalAlpha = 0.5;
+      // Optimized thickness: only 4 offsets instead of a full grid
+      ctx.drawImage(tempCanvas, -t, 0);
+      ctx.drawImage(tempCanvas, t, 0);
+      ctx.drawImage(tempCanvas, 0, -t);
+      ctx.drawImage(tempCanvas, 0, t);
     }
     
     ctx.globalAlpha = 1.0;
