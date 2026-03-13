@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export type FilterType = 'halftone' | 'glitch' | 'ascii' | 'dither' | 'glass' | 'blur' | 'trace' | 'vision' | 'bitcrush' | 'doubleExposure';
+export type FilterType = 'halftone' | 'glitch' | 'ascii' | 'dither' | 'glass' | 'blur' | 'trace' | 'vision' | 'bitcrush' | 'doubleExposure' | 'outline';
 
 export interface FilterParams {
   [key: string]: any;
@@ -61,7 +61,115 @@ export class FilterService {
       case 'doubleExposure':
         this.applyDoubleExposure(ctx, width, height, params, originalImage);
         break;
+      case 'outline':
+        this.applyOutline(ctx, width, height, params, originalImage);
+        break;
     }
+  }
+
+  private static applyOutline(ctx: CanvasRenderingContext2D, w: number, h: number, p: any, img: HTMLImageElement) {
+    const thickness = p.thickness ?? 5;
+    const glow = p.glow ?? 0.5;
+    const edgeBlur = p.edgeBlur ?? 0.1;
+    const showBackground = p.showBackground !== false;
+
+    const color = 'rgb(255, 255, 255)';
+
+    ctx.clearRect(0, 0, w, h);
+
+    // 1. Background (Fixed black)
+    ctx.fillStyle = 'black';
+    ctx.fillRect(0, 0, w, h);
+
+    // 2. Subject (Original) - Respected by showBackground
+    if (showBackground) {
+      ctx.save();
+      ctx.drawImage(img, 0, 0, w, h);
+      ctx.restore();
+    }
+
+    // 3. Outline Effect (Sobel Edge Detection)
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = w;
+    tempCanvas.height = h;
+    const tCtx = tempCanvas.getContext('2d')!;
+    
+    // Grayscale pass for edge detection
+    tCtx.filter = 'grayscale(100%)';
+    tCtx.drawImage(img, 0, 0, w, h);
+    
+    const imageData = tCtx.getImageData(0, 0, w, h);
+    const data = imageData.data;
+    const edgeData = new Uint8ClampedArray(data.length);
+
+    // Sobel kernels
+    const gx = [
+      [-1, 0, 1],
+      [-2, 0, 2],
+      [-1, 0, 1]
+    ];
+    const gy = [
+      [-1, -2, -1],
+      [0, 0, 0],
+      [1, 2, 1]
+    ];
+
+    for (let y = 1; y < h - 1; y++) {
+      for (let x = 1; x < w - 1; x++) {
+        let resX = 0;
+        let resY = 0;
+
+        for (let ky = -1; ky <= 1; ky++) {
+          for (let kx = -1; kx <= 1; kx++) {
+            const pixelIdx = ((y + ky) * w + (x + kx)) * 4;
+            const val = data[pixelIdx]; // Grayscale so R=G=B
+            resX += val * gx[ky + 1][kx + 1];
+            resY += val * gy[ky + 1][kx + 1];
+          }
+        }
+
+        const magnitude = Math.sqrt(resX * resX + resY * resY);
+        const i = (y * w + x) * 4;
+        
+        // Higher threshold for thinner lines
+        if (magnitude > 45) {
+          edgeData[i] = 255;
+          edgeData[i+1] = 255;
+          edgeData[i+2] = 255;
+          edgeData[i+3] = 255;
+        }
+      }
+    }
+    
+    tCtx.putImageData(new ImageData(edgeData, w, h), 0, 0);
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    
+    // Glow
+    if (glow > 0) {
+      ctx.shadowBlur = glow * 15;
+      ctx.shadowColor = color;
+    }
+    
+    // Edge Blur - Only affects the lines drawn below
+    ctx.filter = `blur(${edgeBlur * 10}px)`;
+    
+    ctx.globalAlpha = 0.8;
+    const t = Math.floor(thickness);
+    // Subtle thickness loop
+    for (let dy = -t; dy <= t; dy++) {
+      for (let dx = -t; dx <= t; dx++) {
+        if (dx*dx + dy*dy <= t*t) {
+          ctx.drawImage(tempCanvas, dx, dy);
+        }
+      }
+    }
+    
+    ctx.globalAlpha = 1.0;
+    ctx.drawImage(tempCanvas, 0, 0);
+    
+    ctx.restore();
   }
 
   private static applyDoubleExposure(ctx: CanvasRenderingContext2D, w: number, h: number, p: any, img: HTMLImageElement) {
@@ -481,32 +589,62 @@ export class FilterService {
       return (currentSeed - 1) / 2147483646;
     };
 
+    const getBrightness = (x: number, y: number) => {
+      const px = Math.floor(Math.max(0, Math.min(w - 1, x)));
+      const py = Math.floor(Math.max(0, Math.min(h - 1, y)));
+      const idx = (py * w + px) * 4;
+      return (imageData[idx] * 0.299 + imageData[idx + 1] * 0.587 + imageData[idx + 2] * 0.114) / 255;
+    };
+
     const lines = Math.floor(density * 5000);
     for (let i = 0; i < lines; i++) {
       let x = random() * w;
       let y = random() * h;
       
+      // Only start lines in areas that aren't too dark
+      if (getBrightness(x, y) < (1 - sensitivity) * 0.5) continue;
+
       ctx.beginPath();
       ctx.moveTo(x, y);
       
-      for (let j = 0; j < 20; j++) {
-        const px = Math.floor(x);
-        const py = Math.floor(y);
-        if (px < 0 || px >= w || py < 0 || py >= h) break;
+      for (let j = 0; j < 30; j++) {
+        const b = getBrightness(x, y);
         
-        const idx = (py * w + px) * 4;
-        const r = imageData[idx];
-        const g = imageData[idx + 1];
-        const b = imageData[idx + 2];
-        const brightness = (r * 0.299 + g * 0.587 + b * 0.114) / 255;
+        // Calculate gradient
+        const bRight = getBrightness(x + 2, y);
+        const bLeft = getBrightness(x - 2, y);
+        const bDown = getBrightness(x, y + 2);
+        const bUp = getBrightness(x, y - 2);
         
-        if (brightness > (1 - sensitivity)) {
-          x += (random() - 0.5) * 20;
-          y += (random() - 0.5) * 20;
-          ctx.lineTo(x, y);
+        const gx = bRight - bLeft;
+        const gy = bDown - bUp;
+        
+        // Move along the contour (perpendicular to gradient) or along gradient
+        // To "fit" the image, we follow the contours (edges)
+        // Perpendicular to (gx, gy) is (-gy, gx)
+        const speed = 5;
+        const mag = Math.sqrt(gx * gx + gy * gy) || 1;
+        
+        // Add some noise to prevent getting stuck
+        const nx = (random() - 0.5) * 2;
+        const ny = (random() - 0.5) * 2;
+        
+        if (mag < 0.01) {
+          x += (random() - 0.5) * 10;
+          y += (random() - 0.5) * 10;
         } else {
-          break;
+          // Follow contour
+          x += (-gy / mag) * speed + nx;
+          y += (gx / mag) * speed + ny;
         }
+        
+        if (x < 0 || x >= w || y < 0 || y >= h) break;
+        
+        // Fade out lines in darker areas
+        ctx.strokeStyle = `rgba(255, 255, 255, ${Math.max(0, b * 0.5)})`;
+        ctx.lineTo(x, y);
+        
+        if (b < (1 - sensitivity) * 0.2) break;
       }
       ctx.stroke();
     }

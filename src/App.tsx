@@ -26,7 +26,8 @@ import {
   EyeOff,
   Palette,
   Maximize,
-  Binary
+  Binary,
+  Square
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useDropzone } from 'react-dropzone';
@@ -59,6 +60,7 @@ const EFFECTS: Effect[] = [
   { id: 'vision', name: 'Computer Vision', description: 'Bounding boxes & analysis overlays', icon: <Maximize className="w-6 h-6" /> },
   { id: 'bitcrush', name: 'Bit Crusher', description: '8-bit retro quantization & posterization', icon: <Binary className="w-6 h-6" /> },
   { id: 'doubleExposure', name: 'Double Exposure', description: 'Urban glitch & ghost layering', icon: <Layers className="w-6 h-6" /> },
+  { id: 'outline', name: 'White Outline', description: 'Luminous halo & sharp edge tracing', icon: <Square className="w-6 h-6" /> },
 ];
 
 // --- Components ---
@@ -104,10 +106,11 @@ function ThumbnailPreview({ image, effect }: { image: string, effect: FilterType
           dither: { intensity: 0.5, complexity: 0.5, amount: 1.0, seed: 0, showBackground: true },
           glass: { distortion: 0.4, refraction: 1.3, blur: 0.2, showBackground: true },
           blur: { length: 20, angle: 0, showBackground: true },
-          trace: { sensitivity: 0.5, density: 0.4, showBackground: false },
+          trace: { sensitivity: 0.5, density: 0.4, showBackground: true },
           vision: { boxes: 10, boxSize: 1.0, transparency: 1.0, shape: 'rectangle', seed: 0, showBackground: true },
           bitcrush: { blockSize: 4, banding: 1.0, dither: 0.5, showBackground: true },
           doubleExposure: { exposure: 1.5, blur: 15, ghosting: 0.4, blend: 0.6, showBackground: true },
+          outline: { thickness: 3, glow: 0.5, edgeBlur: 0.1, showBackground: true },
         };
 
         FilterService.applyFilter(ctx, size, size, effect, defaults[effect], croppedImg);
@@ -219,10 +222,11 @@ export default function App() {
         dither: { intensity: 0.5, complexity: 0.5, amount: 1.0, seed: 0, showBackground: true },
         glass: { distortion: 0.4, refraction: 1.3, blur: 0.2, showBackground: true },
         blur: { length: 20, angle: 0, showBackground: true },
-        trace: { sensitivity: 0.5, density: 0.4, showBackground: false },
+        trace: { sensitivity: 0.5, density: 0.4, showBackground: true },
         vision: { boxes: 10, boxSize: 1.0, transparency: 1.0, shape: 'rectangle', seed: 0, showBackground: true },
         bitcrush: { blockSize: 4, banding: 1.0, dither: 0.5, showBackground: true },
         doubleExposure: { exposure: 1.5, blur: 15, ghosting: 0.4, blend: 0.6, showBackground: true },
+        outline: { thickness: 3, glow: 0.5, edgeBlur: 0.1, showBackground: true },
       };
       setParams(defaults[activeEffect]);
     }
@@ -511,10 +515,11 @@ function Workspace({
                 dither: { intensity: 0.5, complexity: 0.5, amount: 1.0, seed: 0, showBackground: true },
                 glass: { distortion: 0.4, refraction: 1.3, blur: 0.2, showBackground: true },
                 blur: { length: 20, angle: 0, showBackground: true },
-                trace: { sensitivity: 0.5, density: 0.4, showBackground: false },
+                trace: { sensitivity: 0.5, density: 0.4, showBackground: true },
                 vision: { boxes: 10, boxSize: 1.0, transparency: 1.0, shape: 'rectangle', seed: 0, showBackground: true },
                 bitcrush: { blockSize: 4, banding: 1.0, dither: 0.5, showBackground: true },
                 doubleExposure: { exposure: 1.5, blur: 15, ghosting: 0.4, blend: 0.6, showBackground: true },
+                outline: { thickness: 3, glow: 0.5, edgeBlur: 0.1, showBackground: true },
               };
               setParams(defaults[effect]);
             }}
@@ -528,6 +533,8 @@ function Workspace({
           {Object.entries(params)
             .filter(([key]) => {
               if (key === 'showBackground') return false;
+              if (key === 'bgOpacity') return false;
+              if (key === 'temp') return false;
               if (effect === 'ascii' && key === 'colorize') return false;
               if (effect === 'glitch' && key === 'seed') return false;
               if (effect === 'vision' && key === 'seed') return false;
@@ -549,11 +556,12 @@ function Workspace({
                   max={
                     key === 'angle' ? 360 : 
                     ['size', 'length', 'fontSize', 'boxes', 'blockSize'].includes(key) ? 50 : 
+                    key === 'thickness' ? 8 :
                     key === 'boxSize' ? 3 :
                     key === 'seed' ? 1000 :
                     key === 'exposure' ? 3 :
                     ['contrast', 'refraction'].includes(key) ? 3 :
-                    ['asciiStrength', 'transparency', 'intensity', 'complexity', 'amount', 'distortion', 'blur', 'sensitivity', 'density', 'banding', 'dither', 'ghosting', 'blend'].includes(key) ? 1 : 
+                    ['asciiStrength', 'transparency', 'intensity', 'complexity', 'amount', 'distortion', 'blur', 'sensitivity', 'density', 'banding', 'dither', 'ghosting', 'blend', 'glow', 'edgeBlur', 'temp'].includes(key) ? 1 : 
                     2
                   } 
                   step={key === 'blockSize' ? 1 : 0.01}
@@ -614,19 +622,21 @@ function Workspace({
           ))}
         </div>
 
-        <div className="mt-12 grid grid-cols-2 gap-3">
-          <button 
-            onClick={() => setParams(prev => ({ ...prev, showBackground: !prev.showBackground }))}
-            className={cn(
-              "flex items-center justify-center gap-2 py-3 rounded-none border transition-all text-sm font-medium",
-              params.showBackground ? "bg-red-600 text-white border-red-600" : "bg-white/5 border-white/10 text-zinc-400 hover:bg-white/10"
-            )}
-          >
-            {params.showBackground ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-            Background
-          </button>
+        <div className="mt-12 grid grid-cols-1 gap-3">
+          {effect !== 'halftone' && (
+            <button 
+              onClick={() => setParams(prev => ({ ...prev, showBackground: !prev.showBackground }))}
+              className={cn(
+                "flex items-center justify-center gap-2 py-3 rounded-none border transition-all text-sm font-medium",
+                params.showBackground ? "bg-red-600 text-white border-red-600" : "bg-white/5 border-white/10 text-zinc-400 hover:bg-white/10"
+              )}
+            >
+              {params.showBackground ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              Background
+            </button>
+          )}
 
-          {effect === 'ascii' ? (
+          {effect === 'ascii' && (
             <button 
               onClick={() => setParams(prev => ({ ...prev, colorize: !prev.colorize }))}
               className={cn(
@@ -636,22 +646,6 @@ function Workspace({
             >
               <Palette className="w-4 h-4" />
               Colorize
-            </button>
-          ) : effect === 'glitch' || effect === 'vision' ? (
-            <button 
-              onClick={() => setParams(prev => ({ ...prev, seed: Math.random() * 1000 }))}
-              className="flex items-center justify-center gap-2 py-3 rounded-none bg-red-600 text-white hover:bg-red-500 transition-colors text-sm font-medium"
-            >
-              <Zap className="w-4 h-4" />
-              Randomize
-            </button>
-          ) : (
-            <button 
-              onClick={handleRandomize}
-              className="flex items-center justify-center gap-2 py-3 rounded-none bg-white/5 border border-white/10 hover:bg-white/10 transition-colors text-sm font-medium"
-            >
-              <Zap className="w-4 h-4" />
-              Randomize
             </button>
           )}
         </div>
