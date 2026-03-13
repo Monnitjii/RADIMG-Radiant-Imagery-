@@ -626,7 +626,7 @@ function Workspace({
         </div>
 
         <div className="mt-12 grid grid-cols-1 gap-3">
-          {effect !== 'halftone' && effect !== 'doubleExposure' && (
+          {!['halftone', 'doubleExposure', 'dither', 'glitch', 'blur', 'bitcrush'].includes(effect) && (
             <button 
               onClick={() => setParams(prev => ({ ...prev, showBackground: !prev.showBackground }))}
               className={cn(
